@@ -1,7 +1,7 @@
 package com.jmp.infrastructure.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.jmp.domain.model.Conference;
+import com.jmp.domain.conference.entity.Conference;
 import com.jmp.application.dto.ConferenceStatusDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

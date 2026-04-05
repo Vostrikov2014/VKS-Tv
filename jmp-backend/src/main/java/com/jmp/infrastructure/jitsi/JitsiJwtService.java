@@ -94,7 +94,7 @@ public class JitsiJwtService {
      */
     public Map<String, Object> extractUserContext(String token) {
         try {
-            return JWT.decode(token).getClaim("context").asMap(Object.class);
+            return JWT.decode(token).getClaim("context").asMap();
         } catch (Exception e) {
             log.error("Failed to extract user context from token", e);
             return new HashMap<>();
@@ -115,8 +115,8 @@ public class JitsiJwtService {
                 yield Algorithm.RSA256(null, null);
             }
             case "EdDSA" -> {
-                // For EdDSA, you would load the Ed25519 key
-                yield Algorithm.EdDSA(null, null);
+                log.warn("EdDSA requested but not yet implemented, falling back to HMAC256");
+                yield Algorithm.HMAC256(secret);
             }
             default -> Algorithm.HMAC256(secret);
         };

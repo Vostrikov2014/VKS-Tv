@@ -4,7 +4,7 @@ import com.jmp.application.dto.RecordingDto;
 import com.jmp.application.dto.RecordingCreateRequest;
 import com.jmp.application.service.RecordingService;
 import com.jmp.infrastructure.security.CurrentUser;
-import com.jmp.domain.model.User;
+import com.jmp.domain.user.entity.User;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;

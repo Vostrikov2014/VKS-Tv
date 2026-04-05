@@ -14,6 +14,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 import java.io.InputStream;
 import java.net.URL;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -102,7 +103,7 @@ public class S3StorageService {
             // Check retention policy before deletion
             if (!forceDelete && isUnderRetentionPeriod(objectKey)) {
                 log.warn("Cannot delete recording under retention policy: {}", objectKey);
-                throw new StorageException("Recording is under retention policy");
+                throw new StorageException("Recording is under retention policy", null);
             }
 
             DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()

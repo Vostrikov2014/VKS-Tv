@@ -30,6 +30,11 @@ public interface UserRepository extends JpaRepository<User, String> {
     boolean existsByEmail(String email);
 
     /**
+     * Checks if a user exists by email (case-insensitive).
+     */
+    boolean existsByEmailIgnoreCase(String email);
+
+    /**
      * Finds all users belonging to a specific tenant.
      */
     @EntityGraph(attributePaths = {"tenant"})

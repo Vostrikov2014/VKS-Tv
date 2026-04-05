@@ -48,12 +48,6 @@ public interface ConferenceRepository extends JpaRepository<Conference, String> 
     List<Conference> findByTenantIdAndStatus(String tenantId, Conference.ConferenceStatus status);
 
     /**
-     * Finds active conferences for a tenant.
-     */
-    @EntityGraph(attributePaths = {"tenant", "createdBy"})
-    List<Conference> findByTenantIdAndStatus(String tenantId, Conference.ConferenceStatus status);
-
-    /**
      * Finds scheduled conferences starting within a time range.
      */
     @Query("SELECT c FROM Conference c WHERE c.tenant.id = :tenantId " +
@@ -101,4 +95,24 @@ public interface ConferenceRepository extends JpaRepository<Conference, String> 
      */
     @Query("SELECT c FROM Conference c WHERE c.deletedAt IS NULL")
     Page<Conference> findAllActive(Pageable pageable);
+
+    /**
+     * Finds conferences by status and scheduled start time range.
+     */
+    List<Conference> findByStatusAndScheduledStartAtBetween(Conference.ConferenceStatus status, Instant start, Instant end);
+
+    /**
+     * Finds conferences by status and ended before a specific time.
+     */
+    List<Conference> findByStatusAndEndedAtBefore(Conference.ConferenceStatus status, Instant instant);
+
+    /**
+     * Counts conferences created within a time range.
+     */
+    long countByCreatedAtBetween(Instant start, Instant end);
+
+    /**
+     * Counts conferences by status and created within a time range.
+     */
+    long countByStatusAndCreatedAtBetween(Conference.ConferenceStatus status, Instant start, Instant end);
 }

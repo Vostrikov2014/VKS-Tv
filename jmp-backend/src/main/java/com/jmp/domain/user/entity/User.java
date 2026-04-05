@@ -2,7 +2,9 @@ package com.jmp.domain.user.entity;
 
 import com.jmp.domain.common.BaseEntity;
 import com.jmp.domain.tenant.entity.Tenant;
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -78,6 +80,12 @@ public class User extends BaseEntity {
     @Column(name = "role", nullable = false)
     @Enumerated(EnumType.STRING)
     private UserRole role = UserRole.USER;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role")
+    private Set<UserRole> roles = new HashSet<>();
 
     public enum UserStatus {
         ACTIVE,
@@ -240,6 +248,14 @@ public class User extends BaseEntity {
 
     public void setRole(UserRole role) {
         this.role = role;
+    }
+
+    public Set<UserRole> getRoles() {
+        return roles;
+    }
+
+    public void setRoles(Set<UserRole> roles) {
+        this.roles = roles;
     }
 
     /**

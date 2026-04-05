@@ -52,6 +52,15 @@ public class Conference extends BaseEntity {
     @Column(name = "actual_end_at")
     private Instant actualEndAt;
 
+    @Column(name = "started_at")
+    private Instant startedAt;
+
+    @Column(name = "ended_at")
+    private Instant endedAt;
+
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
     @Column(name = "max_participants")
     private Integer maxParticipants;
 
@@ -108,7 +117,9 @@ public class Conference extends BaseEntity {
         ACTIVE,
         COMPLETED,
         CANCELLED,
-        FAILED
+        FAILED,
+        ARCHIVED,
+        ENDED
     }
 
     // Constructors
@@ -193,6 +204,30 @@ public class Conference extends BaseEntity {
 
     public void setActualEndAt(Instant actualEndAt) {
         this.actualEndAt = actualEndAt;
+    }
+
+    public Instant getStartedAt() {
+        return startedAt;
+    }
+
+    public void setStartedAt(Instant startedAt) {
+        this.startedAt = startedAt;
+    }
+
+    public Instant getEndedAt() {
+        return endedAt;
+    }
+
+    public void setEndedAt(Instant endedAt) {
+        this.endedAt = endedAt;
+    }
+
+    public Instant getArchivedAt() {
+        return archivedAt;
+    }
+
+    public void setArchivedAt(Instant archivedAt) {
+        this.archivedAt = archivedAt;
     }
 
     public Integer getMaxParticipants() {

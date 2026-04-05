@@ -1,8 +1,7 @@
 package com.jmp.infrastructure.scheduler;
 
-import com.jmp.domain.repository.ConferenceRepository;
-import com.jmp.domain.model.Conference;
-import com.jmp.domain.model.ConferenceStatus;
+import com.jmp.domain.conference.repository.ConferenceRepository;
+import com.jmp.domain.conference.entity.Conference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -39,7 +38,7 @@ public class ConferenceScheduler {
         
         List<Conference> scheduledConferences = conferenceRepository
             .findByStatusAndScheduledStartAtBetween(
-                ConferenceStatus.SCHEDULED,
+                Conference.ConferenceStatus.SCHEDULED,
                 now,
                 windowEnd
             );
@@ -69,11 +68,11 @@ public class ConferenceScheduler {
         log.debug("Cleaning up conferences ended before {}", expirationThreshold);
         
         List<Conference> expiredConferences = conferenceRepository
-            .findByStatusAndEndedAtBefore(ConferenceStatus.ENDED, expirationThreshold);
+            .findByStatusAndEndedAtBefore(Conference.ConferenceStatus.COMPLETED, expirationThreshold);
         
         for (Conference conference : expiredConferences) {
             try {
-                conference.setStatus(ConferenceStatus.ARCHIVED);
+                conference.setStatus(Conference.ConferenceStatus.ARCHIVED);
                 conference.setArchivedAt(Instant.now());
                 conferenceRepository.save(conference);
                 
@@ -98,19 +97,19 @@ public class ConferenceScheduler {
         log.debug("Synchronizing conference status with Jitsi");
         
         List<Conference> activeConferences = conferenceRepository
-            .findByStatus(ConferenceStatus.ACTIVE);
+            .findByStatusAndScheduledStartAtBetween(Conference.ConferenceStatus.ACTIVE, Instant.now().minusSeconds(86400), Instant.now());
         
         int synchronizedCount = 0;
         for (Conference conference : activeConferences) {
             try {
                 // Check if conference still exists in Jitsi
-                boolean stillActive = checkConferenceInJitsi(conference.getRoomName());
+                boolean stillActive = checkConferenceInJitsi(conference.getRoomId());
                 
                 if (!stillActive && conference.getStartedAt() != null) {
                     Instant now = Instant.now();
                     // If conference ended more than 10 minutes ago according to Jitsi
                     if (now.isAfter(conference.getStartedAt().plusSeconds(600))) {
-                        conference.setStatus(ConferenceStatus.ENDED);
+                        conference.setStatus(Conference.ConferenceStatus.ENDED);
                         conference.setEndedAt(now);
                         conferenceRepository.save(conference);
                         synchronizedCount++;
@@ -141,7 +140,7 @@ public class ConferenceScheduler {
         
         List<Conference> upcomingConferences = conferenceRepository
             .findByStatusAndScheduledStartAtBetween(
-                ConferenceStatus.SCHEDULED,
+                Conference.ConferenceStatus.SCHEDULED,
                 now,
                 reminderWindow
             );
@@ -174,7 +173,7 @@ public class ConferenceScheduler {
             // Aggregate conference statistics
             long totalConferences = conferenceRepository.countByCreatedAtBetween(startOfDay, endOfDay);
             long activeConferences = conferenceRepository.countByStatusAndCreatedAtBetween(
-                ConferenceStatus.ACTIVE, startOfDay, endOfDay);
+                Conference.ConferenceStatus.ACTIVE, startOfDay, endOfDay);
             
             log.info("Daily statistics - Total: {}, Active: {}", totalConferences, activeConferences);
             
@@ -185,12 +184,12 @@ public class ConferenceScheduler {
     }
 
     private void activateConference(Conference conference) {
-        conference.setStatus(ConferenceStatus.ACTIVE);
+        conference.setStatus(Conference.ConferenceStatus.ACTIVE);
         conference.setStartedAt(Instant.now());
         conferenceRepository.save(conference);
         
         log.info("Activated scheduled conference: {} in room: {}", 
-                conference.getId(), conference.getRoomName());
+                conference.getId(), conference.getRoomId());
         
         // TODO: Trigger notification to participants
     }

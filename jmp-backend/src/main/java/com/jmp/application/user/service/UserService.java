@@ -50,7 +50,7 @@ public class UserService {
         Page<User> users;
         
         if (StringUtils.hasText(search)) {
-            users = userRepository.searchUsers(tenantId, search, pageable);
+            users = userRepository.searchByTenantAndNameOrEmail(tenantId, search, pageable);
         } else if (StringUtils.hasText(tenantId)) {
             users = userRepository.findByTenantId(tenantId, pageable);
         } else {
