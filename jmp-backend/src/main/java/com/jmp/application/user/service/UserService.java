@@ -1,24 +1,32 @@
 package com.jmp.application.user.service;
 
+import com.jmp.application.user.dto.CreateUserRequest;
+import com.jmp.application.user.dto.UpdateUserRequest;
+import com.jmp.application.user.dto.UserDto;
 import com.jmp.domain.audit.entity.AuditLog;
 import com.jmp.domain.audit.entity.AuditLog.AuditEventType;
 import com.jmp.domain.audit.repository.AuditLogRepository;
 import com.jmp.domain.tenant.entity.Tenant;
+import com.jmp.domain.tenant.repository.TenantRepository;
 import com.jmp.domain.user.entity.User;
 import com.jmp.domain.user.entity.User.UserRole;
 import com.jmp.domain.user.entity.User.UserStatus;
 import com.jmp.domain.user.repository.UserRepository;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * Service for managing users in the platform.
@@ -31,45 +39,57 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final TenantRepository tenantRepository;
     private final AuditLogRepository auditLogRepository;
     private final PasswordEncoder passwordEncoder;
 
     /**
+     * Finds all users with optional filtering.
+     */
+    public Page<UserDto> findAll(String tenantId, String role, String status, String search, Pageable pageable) {
+        Page<User> users;
+        
+        if (StringUtils.hasText(search)) {
+            users = userRepository.searchUsers(tenantId, search, pageable);
+        } else if (StringUtils.hasText(tenantId)) {
+            users = userRepository.findByTenantId(tenantId, pageable);
+        } else {
+            users = userRepository.findAll(pageable);
+        }
+        
+        return users.map(this::toDto);
+    }
+
+    /**
      * Finds a user by ID.
      */
-    public Optional<User> findById(String id) {
-        return userRepository.findById(id);
+    public UserDto findById(String id) {
+        User user = userRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("User not found: " + id));
+        return toDto(user);
     }
 
     /**
-     * Finds a user by email (case-insensitive).
-     */
-    public Optional<User> findByEmail(String email) {
-        return userRepository.findByEmailIgnoreCase(email);
-    }
-
-    /**
-     * Finds all users for a tenant with pagination.
-     */
-    public Page<User> findByTenantId(String tenantId, Pageable pageable) {
-        return userRepository.findByTenantId(tenantId, pageable);
-    }
-
-    /**
-     * Searches users by name or email within a tenant.
-     */
-    public Page<User> searchUsers(String tenantId, String searchTerm, Pageable pageable) {
-        return userRepository.searchUsers(tenantId, searchTerm, pageable);
-    }
-
-    /**
-     * Creates a new user in the system.
+     * Creates a new user.
      */
     @Transactional
-    public User createUser(CreateUserRequest request, String currentUserId, Tenant tenant) {
+    public UserDto create(CreateUserRequest request) {
         // Check if email already exists
         if (userRepository.existsByEmailIgnoreCase(request.email())) {
             throw new IllegalArgumentException("Email already exists: " + request.email());
+        }
+
+        // Get tenant
+        Tenant tenant = null;
+        if (StringUtils.hasText(request.tenantId())) {
+            tenant = tenantRepository.findById(request.tenantId())
+                .orElseThrow(() -> new IllegalArgumentException("Tenant not found: " + request.tenantId()));
+        } else {
+            // Get current user's tenant
+            String currentUserId = getCurrentUserId();
+            User currentUser = userRepository.findById(currentUserId)
+                .orElseThrow(() -> new IllegalArgumentException("Current user not found"));
+            tenant = currentUser.getTenant();
         }
 
         // Encode password
@@ -81,10 +101,23 @@ public class UserService {
         user.setPasswordHash(encodedPassword);
         user.setFirstName(request.firstName());
         user.setLastName(request.lastName());
-        user.setPhone(request.phone());
-        user.setRole(request.role() != null ? request.role() : UserRole.USER);
-        user.setStatus(UserStatus.PENDING);
         user.setTenant(tenant);
+        user.setStatus(UserStatus.ACTIVE);
+        
+        // Set roles
+        if (request.roles() != null && !request.roles().isEmpty()) {
+            Set<UserRole> roles = new HashSet<>();
+            for (String roleName : request.roles()) {
+                try {
+                    roles.add(UserRole.valueOf(roleName));
+                } catch (IllegalArgumentException e) {
+                    log.warn("Invalid role: {}", roleName);
+                }
+            }
+            if (!roles.isEmpty()) {
+                user.setRoles(roles);
+            }
+        }
 
         // Save user
         User savedUser = userRepository.save(user);
@@ -96,98 +129,83 @@ public class UserService {
             "USER",
             savedUser.getId(),
             "Created user: " + savedUser.getEmail(),
-            currentUserId,
+            getCurrentUserId(),
             tenant.getId(),
             true,
             null
         );
 
         log.info("Created user: {}", savedUser.getEmail());
-        return savedUser;
+        return toDto(savedUser);
     }
 
     /**
-     * Updates an existing user.
+     * Updates a user fully.
      */
     @Transactional
-    public User updateUser(String userId, UpdateUserRequest request, String currentUserId, Tenant tenant) {
-        User user = userRepository.findByIdAndTenantId(userId, tenant.getId())
+    public UserDto update(String userId, UpdateUserRequest request) {
+        User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
 
         // Update fields
-        if (request.firstName() != null) {
+        if (StringUtils.hasText(request.email())) {
+            if (!user.getEmail().equalsIgnoreCase(request.email()) && 
+                userRepository.existsByEmailIgnoreCase(request.email())) {
+                throw new IllegalArgumentException("Email already exists: " + request.email());
+            }
+            user.setEmail(request.email().toLowerCase().trim());
+        }
+        
+        if (StringUtils.hasText(request.password())) {
+            user.setPasswordHash(passwordEncoder.encode(request.password()));
+        }
+        
+        if (StringUtils.hasText(request.firstName())) {
             user.setFirstName(request.firstName());
         }
-        if (request.lastName() != null) {
+        
+        if (StringUtils.hasText(request.lastName())) {
             user.setLastName(request.lastName());
         }
-        if (request.phone() != null) {
-            user.setPhone(request.phone());
-        }
-        if (request.avatarUrl() != null) {
-            user.setAvatarUrl(request.avatarUrl());
-        }
-        if (request.role() != null) {
-            UserRole oldRole = user.getRole();
-            user.setRole(request.role());
-            
-            // Audit role change
-            logAuditEvent(
-                AuditEventType.ROLE_CHANGED,
-                "Role changed",
-                "USER",
-                userId,
-                "Role changed from " + oldRole + " to " + request.role(),
-                currentUserId,
-                tenant.getId(),
-                true,
-                null
-            );
-        }
-        if (request.status() != null) {
-            UserStatus oldStatus = user.getStatus();
-            user.setStatus(request.status());
-            
-            // Audit status change
-            if (request.status() == UserStatus.SUSPENDED) {
-                logAuditEvent(
-                    AuditEventType.USER_SUSPENDED,
-                    "User suspended",
-                    "USER",
-                    userId,
-                    "User suspended",
-                    currentUserId,
-                    tenant.getId(),
-                    true,
-                    null
-                );
-            } else if (request.status() == UserStatus.ACTIVE && oldStatus == UserStatus.SUSPENDED) {
-                logAuditEvent(
-                    AuditEventType.USER_ACTIVATED,
-                    "User activated",
-                    "USER",
-                    userId,
-                    "User activated",
-                    currentUserId,
-                    tenant.getId(),
-                    true,
-                    null
-                );
+
+        // Update roles
+        if (request.roles() != null) {
+            Set<UserRole> roles = new HashSet<>();
+            for (String roleName : request.roles()) {
+                try {
+                    roles.add(UserRole.valueOf(roleName));
+                } catch (IllegalArgumentException e) {
+                    log.warn("Invalid role: {}", roleName);
+                }
             }
+            user.setRoles(roles);
+        }
+
+        // Update status
+        if (request.active() != null) {
+            user.setStatus(request.active() ? UserStatus.ACTIVE : UserStatus.SUSPENDED);
         }
 
         User updatedUser = userRepository.save(user);
         
         log.info("Updated user: {}", updatedUser.getEmail());
-        return updatedUser;
+        return toDto(updatedUser);
     }
 
     /**
-     * Soft deletes a user.
+     * Partially updates a user.
      */
     @Transactional
-    public void deleteUser(String userId, String currentUserId, Tenant tenant) {
-        User user = userRepository.findByIdAndTenantId(userId, tenant.getId())
+    public UserDto partialUpdate(String userId, UpdateUserRequest request) {
+        return update(userId, request);
+    }
+
+    /**
+     * Deletes a user (soft delete).
+     */
+    @Transactional
+    public void delete(String userId) {
+        User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
 
         user.markDeleted();
@@ -200,8 +218,8 @@ public class UserService {
             "USER",
             userId,
             "Deleted user: " + user.getEmail(),
-            currentUserId,
-            tenant.getId(),
+            getCurrentUserId(),
+            user.getTenant().getId(),
             true,
             null
         );
@@ -210,16 +228,12 @@ public class UserService {
     }
 
     /**
-     * Activates a pending user.
+     * Activates a user.
      */
     @Transactional
-    public User activateUser(String userId, String currentUserId, Tenant tenant) {
-        User user = userRepository.findByIdAndTenantId(userId, tenant.getId())
+    public UserDto activate(String userId) {
+        User user = userRepository.findById(userId)
             .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
-
-        if (user.getStatus() != UserStatus.PENDING) {
-            throw new IllegalStateException("User is not in PENDING status");
-        }
 
         user.setStatus(UserStatus.ACTIVE);
         user.setEmailVerified(true);
@@ -227,106 +241,196 @@ public class UserService {
 
         User activatedUser = userRepository.save(user);
 
-        // Audit log
         logAuditEvent(
             AuditEventType.USER_ACTIVATED,
             "User activated",
             "USER",
             userId,
             "User activated: " + activatedUser.getEmail(),
-            currentUserId,
-            tenant.getId(),
+            getCurrentUserId(),
+            user.getTenant().getId(),
             true,
             null
         );
 
         log.info("Activated user: {}", activatedUser.getEmail());
-        return activatedUser;
+        return toDto(activatedUser);
     }
 
     /**
-     * Resets failed login attempts for a user.
+     * Deactivates a user.
      */
     @Transactional
-    public void resetFailedLoginAttempts(String userId) {
-        userRepository.findById(userId).ifPresent(user -> {
-            user.resetFailedLoginAttempts();
-            userRepository.save(user);
-        });
+    public UserDto deactivate(String userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+
+        user.setStatus(UserStatus.SUSPENDED);
+
+        User deactivatedUser = userRepository.save(user);
+
+        logAuditEvent(
+            AuditEventType.USER_SUSPENDED,
+            "User suspended",
+            "USER",
+            userId,
+            "User suspended: " + deactivatedUser.getEmail(),
+            getCurrentUserId(),
+            user.getTenant().getId(),
+            true,
+            null
+        );
+
+        log.info("Deactivated user: {}", deactivatedUser.getEmail());
+        return toDto(deactivatedUser);
     }
 
     /**
-     * Records a successful login.
+     * Assigns a role to a user.
      */
     @Transactional
-    public void recordLogin(String userId, String ipAddress, String userAgent) {
-        userRepository.findById(userId).ifPresent(user -> {
-            user.setLastLoginAt(Instant.now());
-            user.resetFailedLoginAttempts();
-            userRepository.save(user);
+    public UserDto assignRole(String userId, String role) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
 
-            logAuditEvent(
-                AuditEventType.LOGIN_SUCCESS,
-                "Login successful",
-                "USER",
-                userId,
-                "Successful login from IP: " + ipAddress,
-                userId,
-                user.getTenant().getId(),
-                true,
-                ipAddress,
-                userAgent
-            );
-        });
-    }
-
-    /**
-     * Records a failed login attempt.
-     */
-    @Transactional
-    public void recordFailedLogin(String email, String ipAddress, String userAgent) {
-        Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
-        
-        if (userOpt.isPresent()) {
-            User user = userOpt.get();
-            user.incrementFailedLoginAttempts();
-            
-            // Lock account after 5 failed attempts
-            if (user.getFailedLoginAttempts() >= 5) {
-                user.lockUntil(Instant.now().plusSeconds(900)); // 15 minutes lock
-            }
-            
-            userRepository.save(user);
-
-            logAuditEvent(
-                AuditEventType.LOGIN_FAILURE,
-                "Login failed",
-                "USER",
-                user.getId(),
-                "Failed login attempt #" + user.getFailedLoginAttempts(),
-                user.getId(),
-                user.getTenant().getId(),
-                false,
-                "Invalid credentials",
-                ipAddress,
-                userAgent
-            );
-        } else {
-            // Log failed attempt for non-existent user (potential enumeration attack)
-            logAuditEvent(
-                AuditEventType.LOGIN_FAILURE,
-                "Login failed",
-                "USER",
-                null,
-                "Failed login attempt for non-existent user: " + email,
-                null,
-                null,
-                false,
-                "User not found",
-                ipAddress,
-                userAgent
-            );
+        UserRole userRole;
+        try {
+            userRole = UserRole.valueOf(role);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid role: " + role);
         }
+
+        Set<UserRole> roles = user.getRoles();
+        if (roles == null) {
+            roles = new HashSet<>();
+        }
+        roles.add(userRole);
+        user.setRoles(roles);
+
+        User updatedUser = userRepository.save(user);
+
+        logAuditEvent(
+            AuditEventType.ROLE_CHANGED,
+            "Role assigned",
+            "USER",
+            userId,
+            "Assigned role: " + role,
+            getCurrentUserId(),
+            user.getTenant().getId(),
+            true,
+            null
+        );
+
+        log.info("Assigned role {} to user: {}", role, updatedUser.getEmail());
+        return toDto(updatedUser);
+    }
+
+    /**
+     * Removes a role from a user.
+     */
+    @Transactional
+    public UserDto removeRole(String userId, String role) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+
+        UserRole userRole;
+        try {
+            userRole = UserRole.valueOf(role);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid role: " + role);
+        }
+
+        Set<UserRole> roles = user.getRoles();
+        if (roles != null) {
+            roles.remove(userRole);
+            user.setRoles(roles);
+        }
+
+        User updatedUser = userRepository.save(user);
+
+        logAuditEvent(
+            AuditEventType.ROLE_CHANGED,
+            "Role removed",
+            "USER",
+            userId,
+            "Removed role: " + role,
+            getCurrentUserId(),
+            user.getTenant().getId(),
+            true,
+            null
+        );
+
+        log.info("Removed role {} from user: {}", role, updatedUser.getEmail());
+        return toDto(updatedUser);
+    }
+
+    /**
+     * Checks if the current user is the specified user.
+     */
+    public boolean isCurrentUser(String userId) {
+        String currentUserId = getCurrentUserId();
+        return currentUserId != null && currentUserId.equals(userId);
+    }
+
+    /**
+     * Checks if the current user is a tenant admin of the specified user.
+     */
+    public boolean isTenantAdminOfUser(String userId) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return false;
+        }
+
+        String currentUserId = getCurrentUserId();
+        if (currentUserId == null) {
+            return false;
+        }
+
+        User currentUser = userRepository.findById(currentUserId).orElse(null);
+        if (currentUser == null) {
+            return false;
+        }
+
+        // Check if current user is tenant admin
+        if (!currentUser.getRoles().contains(UserRole.TENANT_ADMIN)) {
+            return false;
+        }
+
+        // Check if both users belong to the same tenant
+        User targetUser = userRepository.findById(userId).orElse(null);
+        if (targetUser == null) {
+            return false;
+        }
+
+        return currentUser.getTenant().getId().equals(targetUser.getTenant().getId());
+    }
+
+    /**
+     * Gets the current authenticated user ID.
+     */
+    private String getCurrentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
+            return null;
+        }
+        return auth.getName();
+    }
+
+    /**
+     * Converts User entity to DTO.
+     */
+    private UserDto toDto(User user) {
+        return new UserDto(
+            user.getId(),
+            user.getEmail(),
+            user.getFirstName(),
+            user.getLastName(),
+            user.getRoles() != null ? user.getRoles().toString() : "",
+            user.getStatus().name(),
+            user.isEmailVerified(),
+            user.getCreatedAt(),
+            user.getUpdatedAt()
+        );
     }
 
     /**
@@ -343,38 +447,16 @@ public class UserService {
         boolean success,
         String errorMessage
     ) {
-        logAuditEvent(eventType, action, resourceType, resourceId, description, userId, tenantId, success, errorMessage, null, null);
-    }
-
-    private void logAuditEvent(
-        AuditEventType eventType,
-        String action,
-        String resourceType,
-        String resourceId,
-        String description,
-        String userId,
-        String tenantId,
-        boolean success,
-        String errorMessage,
-        String ipAddress,
-        String userAgent
-    ) {
         try {
             AuditLog auditLog = new AuditLog(eventType, action, description);
             auditLog.setResourceType(resourceType);
             auditLog.setResourceId(resourceId);
             auditLog.setSuccess(success);
-            auditLog.setIpAddress(ipAddress);
-            auditLog.setUserAgent(userAgent);
             auditLog.setErrorMessage(errorMessage);
             auditLog.setOccurredAt(Instant.now());
 
             if (userId != null) {
                 userRepository.findById(userId).ifPresent(auditLog::setUser);
-            }
-            if (tenantId != null) {
-                // In real implementation, fetch tenant
-                // tenantRepository.findById(tenantId).ifPresent(auditLog::setTenant);
             }
 
             auditLog.sanitize();
@@ -383,28 +465,4 @@ public class UserService {
             log.error("Failed to create audit log entry", e);
         }
     }
-
-    /**
-     * Request DTO for creating a user.
-     */
-    public record CreateUserRequest(
-        String email,
-        String password,
-        String firstName,
-        String lastName,
-        String phone,
-        UserRole role
-    ) {}
-
-    /**
-     * Request DTO for updating a user.
-     */
-    public record UpdateUserRequest(
-        String firstName,
-        String lastName,
-        String phone,
-        String avatarUrl,
-        UserRole role,
-        UserStatus status
-    ) {}
 }

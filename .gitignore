@@ -1,20 +1,18 @@
 ```
-# Compiled and build artifacts
-*.class
-*.o
-*.obj
-*.out
-build/
+# Java/Maven specific
 target/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
 
 # Dependencies
-.m2/
-.gradle/
+lib/
 
-# Logs and temp files
+# Logs
 *.log
-*.tmp
-*.swp
 
 # Environment
 .env
@@ -27,22 +25,12 @@ target/
 *.swp
 *.swo
 
-# OS specific
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# Python (if applicable)
-__pycache__/
-*.pyc
-*.pyo
-.Python
-*.so
-*.egg-info/
-.eggs/
+# Build artifacts
+build/
 dist/
+out/
 ```
