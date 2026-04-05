@@ -1,36 +1,51 @@
 ```
-# Java/Maven specific
-target/
-*.class
-*.jar
-*.war
-*.ear
-*.zip
-*.tar.gz
-
 # Dependencies
-lib/
+node_modules/
+.jest/
+.nyc_output/
+coverage/
+.nyc-output/
 
-# Logs
-*.log
+# Build artifacts
+dist/
+build/
+target/
+out/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Environment
 .env
 .env.local
 *.env.*
 
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
+# Logs
+*.log
 
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Build artifacts
-build/
-dist/
-out/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.gitattributes
+.next
+nyc-output
 ```
